@@ -99,7 +99,7 @@ input.needs{border:2px solid var(--warn);background:var(--warn-bg)}
     </button>
     <div class="big" style="margin-top:16px">Listening…</div>
     <div class="heard" id="liveText" aria-live="polite"></div>
-    <p class="note">Stops by itself when you pause, or tap to stop.</p>
+    <p class="note">Stops after 10 seconds of silence, or tap to stop.</p>
   </div>
   <button class="btn" id="cancelBtn" type="button">Cancel</button>
 </main>
@@ -312,7 +312,7 @@ input.needs{border:2px solid var(--warn);background:var(--warn-bg)}
 
   // ---------- speech ----------
   var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  var rec = null, finalText = '', cancelled = false;
+  var rec = null, cancelled = false;
 
   function voiceUnavailable(message) {
     $('voiceBlock').style.display = 'none';
@@ -324,56 +324,99 @@ input.needs{border:2px solid var(--warn);background:var(--warn-bg)}
     voiceUnavailable('Voice isn’t available in this browser. Type below, or tap your keyboard’s mic.');
   }
 
+  var SILENCE_MS = 10000;          // stop after this much silence
+  var committed = '', stopRequested = false, lastHeard = 0, silenceTimer = null;
+
+  function langCode() {
+    var lang = (navigator.language || '').toLowerCase();
+    return lang.indexOf('en') === 0 ? navigator.language : 'en-GB';
+  }
+  function heardSoFar(extra) { return (committed + ' ' + (extra || '')).replace(/\s+/g, ' ').trim(); }
+
+  function finish() {
+    clearInterval(silenceTimer); silenceTimer = null;
+    if (cancelled) return;
+    cancelled = true;
+    var t = heardSoFar();
+    if (t) openReview(t);
+    else resetHome('Nothing heard. Try again, or type below.');
+  }
+
+  function fail(message) {
+    clearInterval(silenceTimer); silenceTimer = null;
+    if (cancelled) return;
+    cancelled = true;
+    resetHome(message);
+  }
+
+  // One recognition session. The phone ends each session on its own after
+  // a short pause, so we start a new one until 10 s of silence or a tap.
+  function startSession() {
+    rec = new SR();
+    rec.lang = langCode();
+    rec.interimResults = true;
+    rec.continuous = false;
+    rec.maxAlternatives = 1;
+    var sessionFinal = '';
+
+    rec.onresult = function (e) {
+      var interim = '', fin = '';
+      for (var i = 0; i < e.results.length; i++) {
+        if (e.results[i].isFinal) fin += e.results[i][0].transcript;
+        else interim += e.results[i][0].transcript;
+      }
+      sessionFinal = fin;
+      lastHeard = Date.now();
+      $('liveText').textContent = heardSoFar(fin + ' ' + interim);
+    };
+    rec.onerror = function (e) {
+      if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+        fail('Microphone access is blocked. Allow it in your settings, or type below.');
+      } else if (e.error !== 'no-speech' && e.error !== 'aborted') {
+        fail('Voice didn’t work here. Type below, or tap your keyboard’s mic.');
+      }
+      // no-speech: carry on; onend decides whether to restart
+    };
+    rec.onend = function () {
+      if (sessionFinal) committed = heardSoFar(sessionFinal);
+      if (cancelled) return;
+      if (stopRequested || Date.now() - lastHeard >= SILENCE_MS) { finish(); return; }
+      setTimeout(function () {
+        if (cancelled) return;
+        try { startSession(); } catch (err) { finish(); }
+      }, 150);
+    };
+    rec.start();
+  }
+
   $('micBtn').addEventListener('click', function () {
     if (!SR) return;
     setMsg($('homeMsg'), '');
-    finalText = ''; cancelled = false;
+    committed = ''; cancelled = false; stopRequested = false;
+    lastHeard = Date.now();
     $('liveText').textContent = '';
     try {
-      rec = new SR();
-      var lang = (navigator.language || '').toLowerCase();
-      rec.lang = lang.indexOf('en') === 0 ? navigator.language : 'en-GB';
-      rec.interimResults = true;
-      rec.continuous = false;
-      rec.maxAlternatives = 1;
-
-      rec.onresult = function (e) {
-        var interim = '', fin = '';
-        for (var i = 0; i < e.results.length; i++) {
-          if (e.results[i].isFinal) fin += e.results[i][0].transcript;
-          else interim += e.results[i][0].transcript;
-        }
-        finalText = fin;
-        $('liveText').textContent = (fin + ' ' + interim).trim();
-      };
-      rec.onerror = function (e) {
-        if (cancelled) return;
-        cancelled = true;
-        if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
-          resetHome('Microphone access is blocked. Allow it in your settings, or type below.');
-        } else if (e.error === 'no-speech') {
-          resetHome('Nothing heard. Try again, or type below.');
-        } else {
-          resetHome('Voice didn’t work here. Type below, or tap your keyboard’s mic.');
-        }
-      };
-      rec.onend = function () {
-        if (cancelled) return;
-        var t = (finalText || $('liveText').textContent || '').trim();
-        if (t) openReview(t);
-        else resetHome('Nothing heard. Try again, or type below.');
-      };
-
-      rec.start();
+      startSession();
       show('listening');
+      clearInterval(silenceTimer);
+      silenceTimer = setInterval(function () {
+        if (Date.now() - lastHeard >= SILENCE_MS) {
+          stopRequested = true;
+          try { rec.stop(); } catch (e) { finish(); }
+        }
+      }, 500);
     } catch (err) {
       voiceUnavailable('Voice didn’t work here. Type below, or tap your keyboard’s mic.');
     }
   });
 
-  $('stopBtn').addEventListener('click', function () { if (rec) rec.stop(); });
+  $('stopBtn').addEventListener('click', function () {
+    stopRequested = true;
+    try { rec.stop(); } catch (e) { finish(); }
+  });
   $('cancelBtn').addEventListener('click', function () {
     cancelled = true;
+    clearInterval(silenceTimer); silenceTimer = null;
     if (rec) { try { rec.abort(); } catch (e) {} }
     resetHome();
   });
