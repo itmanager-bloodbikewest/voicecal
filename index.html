@@ -58,6 +58,20 @@ input.needs{border:2px solid var(--warn);background:var(--warn-bg)}
 .msg[hidden],.note[hidden]{display:none}
 .note{margin:0;font-size:15px;color:var(--muted);text-align:center}
 .note.ok{color:var(--accent-dark);font-weight:600}
+.backdrop{position:fixed;inset:0;background:rgba(27,27,26,.45);z-index:10}
+.backdrop[hidden],.sheet[hidden],.sheet [hidden]{display:none}
+.sheet{position:fixed;left:0;right:0;bottom:0;z-index:11;max-width:480px;margin:0 auto;background:#fff;border-radius:22px 22px 0 0;
+  padding:28px 24px calc(32px + env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;gap:18px;animation:up .25s ease-out}
+@keyframes up{from{transform:translateY(100%)}}
+@media (prefers-reduced-motion:reduce){.sheet{animation:none}}
+.sheet-head{display:flex;align-items:center;gap:14px}
+.app-icon{width:56px;height:56px;border-radius:14px;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.sheet h2{margin:0;font-family:var(--display);font-size:22px;font-weight:700}
+.sheet p{margin:0;font-size:17px;line-height:1.45;color:#3F3D39}
+.ios-steps{display:flex;flex-direction:column;gap:14px}
+.steps{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:12px}
+.steps li{display:flex;align-items:center;gap:12px;font-size:17px;line-height:1.4}
+.num{width:30px;height:30px;border-radius:50%;background:#E3ECF3;color:var(--accent-dark);font-weight:600;display:flex;align-items:center;justify-content:center;flex-shrink:0}
 :focus-visible{outline:3px solid var(--accent);outline-offset:2px}
 </style>
 </head>
@@ -141,6 +155,30 @@ input.needs{border:2px solid var(--warn);background:var(--warn-bg)}
     <button class="btn" id="againBtn" type="button">Start again</button>
   </div>
 </main>
+
+<!-- Install pop-up -->
+<div class="backdrop" id="installBackdrop" hidden></div>
+<div class="sheet" id="installSheet" role="dialog" aria-modal="true" aria-labelledby="installTitle" hidden>
+  <div class="sheet-head">
+    <div class="app-icon" aria-hidden="true">
+      <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></svg>
+    </div>
+    <h2 id="installTitle" tabindex="-1"></h2>
+  </div>
+  <div id="installAndroid" hidden>
+    <p>Add it to your home screen so it opens like an app.</p>
+  </div>
+  <div id="installIos" class="ios-steps" hidden>
+    <p>It then opens like an app. Three steps:</p>
+    <ol class="steps">
+      <li><span class="num">1</span><span>Tap the Share button <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#1F5F8B" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-4px"><path d="M12 3v12"/><path d="M8 7l4-4 4 4"/><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/></svg></span></li>
+      <li><span class="num">2</span><span>Choose <strong>Add to Home Screen</strong></span></li>
+      <li><span class="num">3</span><span>Tap <strong>Add</strong></span></li>
+    </ol>
+  </div>
+  <button class="btn primary" id="installBtn" type="button" hidden>Install</button>
+  <button class="btn" id="notNowBtn" type="button">Not now</button>
+</div>
 
 <script src="chrono.min.js"></script>
 <script>
@@ -419,6 +457,61 @@ input.needs{border:2px solid var(--warn);background:var(--warn-bg)}
     clearInterval(silenceTimer); silenceTimer = null;
     if (rec) { try { rec.abort(); } catch (e) {} }
     resetHome();
+  });
+
+  // ---------- install pop-up ----------
+  var DISMISS_KEY = 'voicecal-install-dismissed';
+  var deferredPrompt = null, sheetShown = false, pageReady = false;
+
+  function isInstalled() {
+    return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) ||
+      window.navigator.standalone === true;
+  }
+  function isDismissed() { try { return localStorage.getItem(DISMISS_KEY) === '1'; } catch (e) { return false; } }
+  function setDismissed() { try { localStorage.setItem(DISMISS_KEY, '1'); } catch (e) {} }
+  function isIos() {
+    return /iPhone|iPad|iPod/.test(navigator.userAgent) ||
+      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  }
+
+  function showSheet(kind) {
+    if (sheetShown || isInstalled() || isDismissed()) return;
+    sheetShown = true;
+    $('installTitle').textContent = kind === 'ios' ? 'Add to your home screen' : 'Install Voice to Calendar';
+    $('installAndroid').hidden = kind !== 'android';
+    $('installIos').hidden = kind !== 'ios';
+    $('installBtn').hidden = kind !== 'android';
+    $('installBackdrop').hidden = false;
+    $('installSheet').hidden = false;
+    $('installTitle').focus();
+  }
+  function hideSheet() {
+    $('installBackdrop').hidden = true;
+    $('installSheet').hidden = true;
+  }
+
+  $('notNowBtn').addEventListener('click', function () { setDismissed(); hideSheet(); });
+  $('installBtn').addEventListener('click', function () {
+    if (!deferredPrompt) { hideSheet(); return; }
+    deferredPrompt.prompt();
+    deferredPrompt.userChoice.finally(function () { deferredPrompt = null; hideSheet(); });
+  });
+
+  // Android / Chrome: the browser says when the app can be installed
+  window.addEventListener('beforeinstallprompt', function (e) {
+    e.preventDefault();
+    deferredPrompt = e;
+    if (pageReady) showSheet('android');
+  });
+  window.addEventListener('appinstalled', function () { deferredPrompt = null; hideSheet(); });
+
+  // Wait a second after load so it doesn't flash up immediately
+  window.addEventListener('load', function () {
+    setTimeout(function () {
+      pageReady = true;
+      if (deferredPrompt) showSheet('android');
+      else if (isIos()) showSheet('ios');
+    }, 1000);
   });
 
   // ---------- service worker ----------

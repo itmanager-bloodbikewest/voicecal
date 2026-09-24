@@ -1,6 +1,6 @@
 // Voice to Calendar service worker
 // Network-first for the app shell, cache-first for static assets.
-var VERSION = 'voicecal-v2';
+var VERSION = 'voicecal-v3';
 var SHELL = ['./', 'index.html', 'manifest.json'];
 var STATIC = ['chrono.min.js', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png', 'apple-touch-icon.png'];
 
