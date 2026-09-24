@@ -1,0 +1,397 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Voice to Calendar</title>
+<meta name="theme-color" content="#F6F4EF">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="VoiceCal">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Source+Sans+3:wght@400;600&display=swap">
+<style>
+:root{
+  --bg:#F6F4EF; --ink:#1B1B1A; --muted:#5E5B55; --line:#D6D2C8; --field:#C9C4B8;
+  --card:#FFFFFF; --accent:#1F5F8B; --accent-dark:#174A6C;
+  --warn:#B4530A; --warn-text:#8F3F06; --warn-bg:#FFF8F1; --off:#D6D2C8;
+  --display:'Bricolage Grotesque', Georgia, serif;
+  --body:'Source Sans 3', 'Segoe UI', system-ui, sans-serif;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:17px;
+  padding:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px)}
+.screen{min-height:100%;max-width:480px;margin:0 auto;padding:40px 24px 32px;display:flex;flex-direction:column;gap:22px}
+.screen[hidden]{display:none}
+h1{margin:0;font-family:var(--display);font-size:28px;font-weight:700;letter-spacing:-0.01em}
+.sub{margin:0;font-size:16px;color:var(--muted)}
+.head{display:flex;flex-direction:column;gap:6px}
+.stage{flex-grow:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;text-align:center}
+.mic{width:136px;height:136px;border-radius:50%;border:none;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;box-shadow:0 10px 28px rgba(31,95,139,.28);cursor:pointer}
+.mic:active{background:var(--accent-dark)}
+.mic.live{box-shadow:0 0 0 14px rgba(31,95,139,.16),0 0 0 30px rgba(31,95,139,.08);animation:pulse 1.6s ease-in-out infinite}
+@keyframes pulse{50%{box-shadow:0 0 0 18px rgba(31,95,139,.12),0 0 0 36px rgba(31,95,139,.05)}}
+@media (prefers-reduced-motion:reduce){.mic.live{animation:none}}
+.big{font-family:var(--display);font-size:22px;font-weight:600}
+.hint{margin:0;max-width:290px;font-size:16px;line-height:1.45;color:var(--muted)}
+.heard{width:100%;min-height:64px;padding:18px;background:var(--card);border:1px solid var(--line);border-radius:14px;font-size:19px;line-height:1.45}
+.or{display:flex;align-items:center;gap:12px;color:var(--muted);font-size:14px}
+.or::before,.or::after{content:"";flex-grow:1;height:1px;background:var(--line)}
+.field{display:flex;flex-direction:column;gap:6px}
+label{font-size:14px;font-weight:600}
+input,textarea{width:100%;padding:0 14px;height:52px;font-family:inherit;font-size:17px;border:1px solid var(--field);border-radius:12px;background:var(--card);color:var(--ink);-webkit-appearance:none;appearance:none}
+textarea{height:auto;padding:14px;resize:none;line-height:1.4}
+input.needs{border:2px solid var(--warn);background:var(--warn-bg)}
+.pair{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.form{flex-grow:1;display:flex;flex-direction:column;gap:18px}
+.actions{display:flex;flex-direction:column;gap:12px}
+.btn{display:flex;align-items:center;justify-content:center;height:52px;border-radius:12px;font-family:inherit;font-size:17px;font-weight:600;text-decoration:none;cursor:pointer;border:1.5px solid var(--field);background:transparent;color:var(--ink)}
+.btn.outline{border-color:var(--accent);color:var(--accent)}
+.btn.primary{height:56px;font-size:18px;border:none;background:var(--accent);color:#fff}
+.btn.primary[aria-disabled="true"]{background:var(--off);color:var(--muted);cursor:default}
+.msg{display:flex;align-items:flex-start;gap:6px;font-size:15px;font-weight:600;color:var(--warn-text)}
+.msg[hidden],.note[hidden]{display:none}
+.note{margin:0;font-size:15px;color:var(--muted);text-align:center}
+.note.ok{color:var(--accent-dark);font-weight:600}
+:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+</style>
+</head>
+<body>
+
+<!-- 1. Speak or type -->
+<main class="screen" id="home">
+  <div class="head">
+    <h1>Voice to Calendar</h1>
+    <p class="sub">Say an event. Add it to your Google Calendar.</p>
+  </div>
+  <div class="stage">
+    <div id="voiceBlock" style="display:flex;flex-direction:column;align-items:center;gap:20px">
+      <button class="mic" id="micBtn" type="button" aria-label="Tap to speak">
+        <svg width="52" height="52" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></svg>
+      </button>
+      <div class="big">Tap to speak</div>
+    </div>
+    <p class="hint" id="homeHint">Try: “Dentist next Tuesday at 3pm for an hour”</p>
+    <p class="msg" id="homeMsg" hidden></p>
+  </div>
+  <div class="or">or type it</div>
+  <div class="field">
+    <label for="typed">Event</label>
+    <textarea id="typed" rows="2" placeholder="Type here, or tap your keyboard’s mic"></textarea>
+  </div>
+  <button class="btn outline" id="continueBtn" type="button">Continue</button>
+</main>
+
+<!-- 2. Listening -->
+<main class="screen" id="listening" hidden>
+  <div class="head">
+    <h1>Voice to Calendar</h1>
+    <p class="sub">Say an event. Add it to your Google Calendar.</p>
+  </div>
+  <div class="stage">
+    <button class="mic live" id="stopBtn" type="button" aria-label="Stop listening">
+      <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+    </button>
+    <div class="big" style="margin-top:16px">Listening…</div>
+    <div class="heard" id="liveText" aria-live="polite"></div>
+    <p class="note">Stops by itself when you pause, or tap to stop.</p>
+  </div>
+  <button class="btn" id="cancelBtn" type="button">Cancel</button>
+</main>
+
+<!-- 3. Check the details -->
+<main class="screen" id="review" hidden>
+  <div class="head">
+    <h1>Check the details</h1>
+    <p class="sub" id="saidLine"></p>
+  </div>
+  <div class="form">
+    <div class="field">
+      <label for="fTitle">Title</label>
+      <input id="fTitle" type="text" autocomplete="off">
+    </div>
+    <div class="field">
+      <label for="fDate">Date</label>
+      <input id="fDate" type="date">
+      <p class="msg" id="dateMsg" hidden>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink:0;margin-top:1px"><circle cx="12" cy="12" r="9"/><path d="M12 8v5"/><path d="M12 16.5v.5"/></svg>
+        <span>No date heard. Pick one to continue.</span>
+      </p>
+    </div>
+    <div class="pair">
+      <div class="field">
+        <label for="fStart">Start</label>
+        <input id="fStart" type="time">
+      </div>
+      <div class="field">
+        <label for="fEnd">End</label>
+        <input id="fEnd" type="time">
+      </div>
+    </div>
+    <p class="msg" id="formMsg" hidden></p>
+  </div>
+  <div class="actions">
+    <a class="btn primary" id="addBtn" href="#" target="_blank" rel="noopener" aria-disabled="true">Add to Google Calendar</a>
+    <p class="note ok" id="addedNote" hidden>Google Calendar opened. Tap Save there to finish.</p>
+    <button class="btn" id="againBtn" type="button">Start again</button>
+  </div>
+</main>
+
+<script src="chrono.min.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  var DEFAULT_MINUTES = 30;   // no length said
+  var DEFAULT_HOUR = 9;       // date said, no time
+
+  var $ = function (id) { return document.getElementById(id); };
+  var screens = { home: $('home'), listening: $('listening'), review: $('review') };
+  function show(name) {
+    Object.keys(screens).forEach(function (k) { screens[k].hidden = (k !== name); });
+    window.scrollTo(0, 0);
+  }
+
+  // ---------- helpers ----------
+  function pad(n) { return (n < 10 ? '0' : '') + n; }
+  function toDateVal(d) { return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
+  function toTimeVal(d) { return pad(d.getHours()) + ':' + pad(d.getMinutes()); }
+  function addMinutes(d, m) { return new Date(d.getTime() + m * 60000); }
+  function stamp(d) {
+    return d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) + 'T' +
+      pad(d.getHours()) + pad(d.getMinutes()) + '00';
+  }
+  function setMsg(el, text) { el.textContent = text || ''; el.hidden = !text; }
+
+  // ---------- parsing ----------
+  var WORDS = { a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, ten: 10,
+    fifteen: 15, twenty: 20, thirty: 30, forty: 40, 'forty five': 45, 'forty-five': 45, fifty: 50, ninety: 90 };
+  var DUR_RE = /\bfor\s+(half an? hour|an? hour and a half|(\d+(?:\.\d+)?|an?|one|two|three|four|five|six|ten|fifteen|twenty|thirty|forty[- ]five|forty|fifty|ninety)\s*(hours?|hrs?|minutes?|mins?))\b/i;
+
+  function parseDuration(text) {
+    var m = text.match(DUR_RE);
+    if (!m) return null;
+    var phrase = m[1].toLowerCase(), mins;
+    if (/^half an? hour$/.test(phrase)) mins = 30;
+    else if (/hour and a half$/.test(phrase)) mins = 90;
+    else {
+      var n = isNaN(parseFloat(m[2])) ? WORDS[m[2].toLowerCase()] : parseFloat(m[2]);
+      mins = /^h/i.test(m[3]) ? n * 60 : n;
+    }
+    return { minutes: Math.round(mins), text: m[0] };
+  }
+
+  function cleanTitle(s) {
+    s = s.replace(/\s+/g, ' ').trim();
+    var tail = /(?:^|\s)(on|at|for|from|by|in|the|this|next|and|,)$/i;
+    var head = /^(please\s+)?(add|schedule|book|create|put in|new event|remind me to|remind me)\s+/i;
+    var prev;
+    do { prev = s; s = s.replace(tail, '').replace(head, '').replace(/^[\s,.\-]+|[\s,.\-]+$/g, '').trim(); } while (s !== prev);
+    return s ? s.charAt(0).toUpperCase() + s.slice(1) : '';
+  }
+
+  function parseEvent(text) {
+    var out = { title: '', date: null, start: null, end: null };
+    var rest = text;
+    var dur = parseDuration(text);
+    if (dur) rest = rest.replace(dur.text, ' ');
+
+    var results = (window.chronoEn && window.chronoEn.GB)
+      ? window.chronoEn.GB.parse(rest, new Date(), { forwardDate: true }) : [];
+    var r = results[0];
+
+    if (r) {
+      rest = rest.slice(0, r.index) + ' ' + rest.slice(r.index + r.text.length);
+      var s = r.start;
+      var hasDate = s.isCertain('day') || s.isCertain('weekday');
+      var hasTime = s.isCertain('hour');
+      var start = s.date();
+
+      // "at 1", "at 7" with no am/pm: read as afternoon/evening
+      if (hasTime && !s.isCertain('meridiem') && start.getHours() >= 1 && start.getHours() <= 7) {
+        start = addMinutes(start, 12 * 60);
+      }
+      if (!hasTime) { start.setHours(DEFAULT_HOUR, 0, 0, 0); }
+
+      var end;
+      if (r.end && r.end.isCertain('hour')) {
+        end = r.end.date();
+        end.setFullYear(start.getFullYear(), start.getMonth(), start.getDate());
+        if (end <= start) end = addMinutes(end, 12 * 60 * (end.getHours() < 12 ? 1 : 2));
+      } else {
+        end = addMinutes(start, dur ? dur.minutes : DEFAULT_MINUTES);
+      }
+
+      out.date = hasDate ? start : null;
+      out.start = toTimeVal(start);
+      out.end = toTimeVal(end);
+    } else {
+      var d = new Date(); d.setHours(DEFAULT_HOUR, 0, 0, 0);
+      out.start = toTimeVal(d);
+      out.end = toTimeVal(addMinutes(d, dur ? dur.minutes : DEFAULT_MINUTES));
+    }
+    out.title = cleanTitle(rest);
+    return out;
+  }
+
+  // ---------- review screen ----------
+  var f = { title: $('fTitle'), date: $('fDate'), start: $('fStart'), end: $('fEnd') };
+  var addBtn = $('addBtn');
+
+  function openReview(text) {
+    var ev = parseEvent(text);
+    $('saidLine').textContent = 'You said: “' + text + '”';
+    f.title.value = ev.title || text;
+    f.date.value = ev.date ? toDateVal(ev.date) : '';
+    f.start.value = ev.start;
+    f.end.value = ev.end;
+    $('addedNote').hidden = true;
+    validate();
+    show('review');
+  }
+
+  function build() {
+    var title = f.title.value.trim();
+    if (!title || !f.date.value || !f.start.value || !f.end.value) return null;
+    var p = f.date.value.split('-').map(Number);
+    var st = f.start.value.split(':').map(Number);
+    var en = f.end.value.split(':').map(Number);
+    var start = new Date(p[0], p[1] - 1, p[2], st[0], st[1]);
+    var end = new Date(p[0], p[1] - 1, p[2], en[0], en[1]);
+    if (end <= start) end = addMinutes(end, 24 * 60); // runs past midnight
+    var tz = '';
+    try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch (e) {}
+    return 'https://calendar.google.com/calendar/render?action=TEMPLATE' +
+      '&text=' + encodeURIComponent(title) +
+      '&dates=' + stamp(start) + '/' + stamp(end) +
+      (tz ? '&ctz=' + encodeURIComponent(tz) : '');
+  }
+
+  function validate() {
+    var noDate = !f.date.value;
+    f.date.classList.toggle('needs', noDate);
+    $('dateMsg').hidden = !noDate;
+    var msg = '';
+    if (!noDate) {
+      if (!f.title.value.trim()) msg = 'Add a title to continue.';
+      else if (!f.start.value || !f.end.value) msg = 'Add a start and end time to continue.';
+    }
+    setMsg($('formMsg'), msg);
+    var url = build();
+    addBtn.setAttribute('aria-disabled', url ? 'false' : 'true');
+    addBtn.href = url || '#';
+  }
+
+  ['input', 'change'].forEach(function (evt) {
+    Object.keys(f).forEach(function (k) { f[k].addEventListener(evt, validate); });
+  });
+
+  addBtn.addEventListener('click', function (e) {
+    if (addBtn.getAttribute('aria-disabled') === 'true') { e.preventDefault(); return; }
+    $('addedNote').hidden = false;
+  });
+
+  function resetHome(message) {
+    $('typed').value = '';
+    setMsg($('homeMsg'), message || '');
+    show('home');
+  }
+  $('againBtn').addEventListener('click', function () { resetHome(); });
+
+  // ---------- typed input ----------
+  $('continueBtn').addEventListener('click', function () {
+    var t = $('typed').value.trim();
+    if (!t) { setMsg($('homeMsg'), 'Type or say an event first.'); $('typed').focus(); return; }
+    openReview(t);
+  });
+
+  // ---------- speech ----------
+  var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  var rec = null, finalText = '', cancelled = false;
+
+  function voiceUnavailable(message) {
+    $('voiceBlock').style.display = 'none';
+    $('homeHint').hidden = true;
+    setMsg($('homeMsg'), message);
+  }
+
+  if (!SR) {
+    voiceUnavailable('Voice isn’t available in this browser. Type below, or tap your keyboard’s mic.');
+  }
+
+  $('micBtn').addEventListener('click', function () {
+    if (!SR) return;
+    setMsg($('homeMsg'), '');
+    finalText = ''; cancelled = false;
+    $('liveText').textContent = '';
+    try {
+      rec = new SR();
+      var lang = (navigator.language || '').toLowerCase();
+      rec.lang = lang.indexOf('en') === 0 ? navigator.language : 'en-GB';
+      rec.interimResults = true;
+      rec.continuous = false;
+      rec.maxAlternatives = 1;
+
+      rec.onresult = function (e) {
+        var interim = '', fin = '';
+        for (var i = 0; i < e.results.length; i++) {
+          if (e.results[i].isFinal) fin += e.results[i][0].transcript;
+          else interim += e.results[i][0].transcript;
+        }
+        finalText = fin;
+        $('liveText').textContent = (fin + ' ' + interim).trim();
+      };
+      rec.onerror = function (e) {
+        if (cancelled) return;
+        cancelled = true;
+        if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+          resetHome('Microphone access is blocked. Allow it in your settings, or type below.');
+        } else if (e.error === 'no-speech') {
+          resetHome('Nothing heard. Try again, or type below.');
+        } else {
+          resetHome('Voice didn’t work here. Type below, or tap your keyboard’s mic.');
+        }
+      };
+      rec.onend = function () {
+        if (cancelled) return;
+        var t = (finalText || $('liveText').textContent || '').trim();
+        if (t) openReview(t);
+        else resetHome('Nothing heard. Try again, or type below.');
+      };
+
+      rec.start();
+      show('listening');
+    } catch (err) {
+      voiceUnavailable('Voice didn’t work here. Type below, or tap your keyboard’s mic.');
+    }
+  });
+
+  $('stopBtn').addEventListener('click', function () { if (rec) rec.stop(); });
+  $('cancelBtn').addEventListener('click', function () {
+    cancelled = true;
+    if (rec) { try { rec.abort(); } catch (e) {} }
+    resetHome();
+  });
+
+  // ---------- service worker ----------
+  if ('serviceWorker' in navigator) {
+    var reloading = false;
+    var hadController = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.addEventListener('controllerchange', function () {
+      if (!hadController || reloading) return;
+      reloading = true;
+      window.location.reload();
+    });
+    window.addEventListener('load', function () {
+      navigator.serviceWorker.register('sw.js').catch(function () {});
+    });
+  }
+})();
+</script>
+</body>
+</html>
